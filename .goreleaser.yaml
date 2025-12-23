@@ -1,0 +1,46 @@
+---
+project_name: helm-chart-bumper-action
+
+before:
+  hooks:
+    - go test ./...
+
+builds:
+  - id: helm-chart-bumper
+    main: ./cmd/helm-chart-bumper
+    binary: helm-chart-bumper
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    format: tar.gz
+    files:
+      - README.md
+      - action.yml
+
+dockers:
+  - id: action-image
+    image_templates:
+      - "ghcr.io/joejulian/actions/helm-chart-bumper-action:{{ .Version }}"
+      - "ghcr.io/joejulian/actions/helm-chart-bumper-action:latest"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64,linux/arm64"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

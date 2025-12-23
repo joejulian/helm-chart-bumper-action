@@ -1,0 +1,9 @@
+name: "Helm chart bumper"
+description: "Bump Helm Chart.yaml version based on appVersion/dependency semver changes"
+inputs:
+  gh_token:
+    description: "GitHub token (reserved for future GitHub API operations)"
+    required: true
+runs:
+  using: "docker"
+  image: "docker://ghcr.io/joejulian/actions/helm-chart-bumper-action:latest"
