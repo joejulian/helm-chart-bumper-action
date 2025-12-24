@@ -40,7 +40,7 @@ inputs:
 
 runs:
   using: "docker"
-  image: "docker://ghcr.io/joejulian/actions/helm-chart-bumper-action:v0.0.8"
+  image: "docker://ghcr.io/joejulian/actions/helm-chart-bumper-action:v0.0.12"
   args:
     - "--base-ref"
     - "${{ inputs.base_ref }}"
