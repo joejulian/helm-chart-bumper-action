@@ -90,8 +90,17 @@ func main() {
 		}
 	}
 
+	// read current Chart.yaml
 	chartDir := filepath.Dir(*curPath)
-	log.Debug("computed chart directory", zap.String("chartDir", chartDir))
+	chartBytes, err := chart.ReadChartYAML(chartDir)
+	if err != nil {
+		log.Fatal("failed to read Chart.yaml", zap.Error(err))
+	}
+	meta, err := chart.LoadMeta(chartBytes)
+	if err != nil {
+		log.Fatal("failed to parse Chart.yaml", zap.Error(err))
+	}
+	log.Debug("loaded chart metadata", zap.String("name", meta.Name), zap.String("appVersion", meta.AppVersion))
 
 	// Optional: update images and/or deps on disk first (so subsequent reads are consistent).
 	anyFileWritten := false
