@@ -26,15 +26,14 @@ archives:
       - README.md
       - action.yml
 
-dockers:
-  - id: action-image
-    image_templates:
-      - "ghcr.io/joejulian/actions/helm-chart-bumper-action:{{ .Version }}"
-      - "ghcr.io/joejulian/actions/helm-chart-bumper-action:latest"
-    dockerfile: Dockerfile
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/amd64,linux/arm64"
+dockers_v2:
+  - images:
+      - ghcr.io/joejulian/actions/helm-chart-bumper-action
+    tags:
+      - "{{ .Version }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
 
 checksum:
   name_template: "checksums.txt"
