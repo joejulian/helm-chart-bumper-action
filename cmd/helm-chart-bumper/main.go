@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"os"
@@ -79,14 +80,38 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	if *write {
-		if changed {
-			if err := os.WriteFile(*curPath, []byte(out), 0o644); err != nil {
+	didWrite := false
+	if *write && changed {
+		outBytes := []byte(out)
+		// Don’t touch the file if the rendered bytes are identical.
+		if !bytes.Equal(curBytes, outBytes) {
+			if err := os.WriteFile(*curPath, outBytes, 0o644); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(2)
 			}
+			didWrite = true
 		}
+	}
+	if !*write {
+		fmt.Println(out)
+	}
+	writeGithubOutputChanged(didWrite)
+}
+
+func writeGithubOutputChanged(changed bool) {
+	outPath := os.Getenv("GITHUB_OUTPUT")
+	if outPath == "" {
 		return
 	}
-	fmt.Print(out)
+	f, err := os.OpenFile(outPath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	if changed {
+		fmt.Fprintln(f, "changed=true")
+		return
+	}
+	fmt.Fprintln(f, "changed=false")
 }
