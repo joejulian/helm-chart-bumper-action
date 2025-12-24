@@ -178,6 +178,7 @@ func setAtPath(root *any, steps []pathStep, newValue string) error {
 				// go-yaml often uses []interface{}; accept that too.
 				if ai, ok2 := cur.([]interface{}); ok2 {
 					arr = make([]any, len(ai))
+					//nolint:gosimple // ai is []T, arr is []any; copy() requires identical element types
 					for j := range ai {
 						arr[j] = ai[j]
 					}
@@ -218,6 +219,7 @@ func setAtPath(root *any, steps []pathStep, newValue string) error {
 		if !ok {
 			if ai, ok2 := cur.([]interface{}); ok2 {
 				arr = make([]any, len(ai))
+				//nolint:gosimple // ai is []T, arr is []any; copy() requires identical element types
 				for j := range ai {
 					arr[j] = ai[j]
 				}

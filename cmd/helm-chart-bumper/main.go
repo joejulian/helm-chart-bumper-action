@@ -6,26 +6,44 @@ import (
 	"os"
 
 	"github.com/joejulian/helm-chart-bumper-action/internal/chart"
+	"github.com/joejulian/helm-chart-bumper-action/internal/gitutil"
 	"github.com/joejulian/helm-chart-bumper-action/internal/yamlutil"
 )
 
 func main() {
 	var (
-		basePath = flag.String("base", "", "Path to base Chart.yaml")
-		curPath  = flag.String("cur", "", "Path to current Chart.yaml")
-		write    = flag.Bool("write", false, "Write updated Chart.yaml back to --cur")
+		basePath    = flag.String("base", "", "Path to base Chart.yaml")
+		baseRef     = flag.String("base-ref", "", "Git ref to read the base Chart.yaml from (e.g. 'refs/remotes/origin/main' or 'HEAD~1')")
+		baseRefPath = flag.String("base-ref-path", "", "Repository-relative path to base Chart.yaml when using --base-ref (defaults to --cur)")
+		repoRoot    = flag.String("repo", ".", "Path to the git working tree (used with --base-ref)")
+		curPath     = flag.String("cur", "", "Path to current Chart.yaml")
+		write       = flag.Bool("write", false, "Write updated Chart.yaml back to --cur")
 	)
 	flag.Parse()
 
-	if *basePath == "" || *curPath == "" {
-		fmt.Fprintln(os.Stderr, "usage: helm-chart-bumper --base path/to/base/Chart.yaml --cur path/to/cur/Chart.yaml [--write]")
+	if *curPath == "" || (*basePath == "" && *baseRef == "") || (*basePath != "" && *baseRef != "") {
+		fmt.Fprintln(os.Stderr, "usage: helm-chart-bumper (--base path/to/base/Chart.yaml | --base-ref <git-ref> [--base-ref-path path/in/repo/Chart.yaml]) --cur path/to/cur/Chart.yaml [--repo path/to/repo] [--write]")
 		os.Exit(2)
 	}
 
-	baseBytes, err := os.ReadFile(*basePath)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+	var baseBytes []byte
+	var err error
+	if *baseRef != "" {
+		p := *baseRefPath
+		if p == "" {
+			p = *curPath
+		}
+		baseBytes, err = gitutil.ReadFileAtRef(*repoRoot, *baseRef, p)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	} else {
+		baseBytes, err = os.ReadFile(*basePath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	}
 	curBytes, err := os.ReadFile(*curPath)
 	if err != nil {
