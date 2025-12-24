@@ -102,34 +102,73 @@ func main() {
 	}
 	log.Debug("loaded chart metadata", zap.String("name", meta.Name), zap.String("appVersion", meta.AppVersion))
 
-	// Optional: update images and/or deps on disk first (so subsequent reads are consistent).
+	// Optional: update images and/or deps (write to disk only when --write is set).
+	// Even in non-write mode, we apply the updates in-memory so stdout reflects the
+	// updated Chart.yaml and change detection sees the updated appVersion.
 	anyFileWritten := false
-	if *write {
-		log.Debug("write mode enabled")
-		if *updateImages {
-			written, err := updateImagesInChartDir(ctx, chartDir, *scanGlob)
+	updatedFiles := map[string][]byte{}
+
+	if *updateImages {
+		log.Debug("processing image bump directives", zap.Bool("write", *write))
+		if *write {
+			changed, err := updateImagesInChartDir(ctx, chartDir, *scanGlob)
 			if err != nil {
 				log.Error("update images failed", zap.Error(err))
 				os.Exit(2)
 			}
-			anyFileWritten = anyFileWritten || written
-			log.Debug("update images completed", zap.Bool("anyWritten", written))
+			anyFileWritten = anyFileWritten || changed
+			log.Debug("update images completed", zap.Bool("changed", changed))
+		} else {
+			files, changed, err := updateImagesInChartDirMaybeWrite(ctx, chartDir, *scanGlob, false)
+			if err != nil {
+				log.Error("update images failed", zap.Error(err))
+				os.Exit(2)
+			}
+			for k, v := range files {
+				updatedFiles[k] = v
+			}
+			log.Debug("update images completed", zap.Bool("changed", changed))
 		}
-		if *updateDeps {
-			written, err := updateDepsInChartYAML(ctx, chartDir)
+	}
+	if *updateDeps {
+		log.Debug("processing dependency updates", zap.Bool("write", *write))
+		if *write {
+			changed, err := updateDepsInChartYAML(ctx, chartDir)
 			if err != nil {
 				log.Error("update deps failed", zap.Error(err))
 				os.Exit(2)
 			}
-			anyFileWritten = anyFileWritten || written
-			log.Debug("update deps completed", zap.Bool("anyWritten", written))
+			anyFileWritten = anyFileWritten || changed
+			log.Debug("update deps completed", zap.Bool("changed", changed))
+		} else {
+			b, changed, err := updateDepsInChartYAMLMaybeWrite(ctx, chartDir, false)
+			if err != nil {
+				log.Error("update deps failed", zap.Error(err))
+				os.Exit(2)
+			}
+			if b != nil {
+				updatedFiles[filepath.Join(chartDir, "Chart.yaml")] = b
+			}
+			log.Debug("update deps completed", zap.Bool("changed", changed))
 		}
 	}
 
-	curBytes, err := os.ReadFile(*curPath)
-	if err != nil {
-		log.Error("failed reading current chart", zap.Error(err), zap.String("path", *curPath))
-		os.Exit(2)
+	curKey := *curPath
+	if !filepath.IsAbs(curKey) {
+		// Most callers pass a repo-relative path.
+		curKey = filepath.Clean(filepath.Join(*repoRoot, curKey))
+	}
+	curBytes, ok := updatedFiles[curKey]
+	if !ok {
+		// Also try as provided (for callers passing absolute paths).
+		curBytes, ok = updatedFiles[*curPath]
+	}
+	if !ok {
+		curBytes, err = os.ReadFile(*curPath)
+		if err != nil {
+			log.Error("failed reading current chart", zap.Error(err), zap.String("path", *curPath))
+			os.Exit(2)
+		}
 	}
 
 	baseMeta, err := chart.LoadMeta(baseBytes)
@@ -225,26 +264,34 @@ func levelForVerbosity(v int) zapcore.Level {
 }
 
 func updateDepsInChartYAML(ctx context.Context, chartDir string) (bool, error) {
-	log := logutil.FromContext(ctx).With(zap.String("func", "updateDepsInChartYAML"), zap.String("chartDir", chartDir))
+	_, changed, err := updateDepsInChartYAMLMaybeWrite(ctx, chartDir, true)
+	return changed, err
+}
+
+// updateDepsInChartYAMLMaybeWrite resolves dependency version updates and applies them.
+// If write=false, it returns the would-be updated Chart.yaml bytes without touching disk.
+// If write=true, it writes Chart.yaml if it changed and returns nil bytes.
+func updateDepsInChartYAMLMaybeWrite(ctx context.Context, chartDir string, write bool) ([]byte, bool, error) {
+	log := logutil.FromContext(ctx).With(zap.String("func", "updateDepsInChartYAMLMaybeWrite"), zap.String("chartDir", chartDir))
 	chartPath := filepath.Join(chartDir, "Chart.yaml")
 	log.Debug("resolving dependency updates", zap.String("chartPath", chartPath))
 
 	resolved, err := helmdeps.ResolveLatestDependencies(ctx, chartPath)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	log.Debug("resolved dependency candidates", zap.Int("count", len(resolved)))
 	if len(resolved) == 0 {
-		return false, nil
+		return nil, false, nil
 	}
 
 	b, err := os.ReadFile(chartPath)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	ast, err := yamlutil.ParseBytes(b)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 
 	changed := false
@@ -262,33 +309,44 @@ func updateDepsInChartYAML(ctx context.Context, chartDir string) (bool, error) {
 		p := fmt.Sprintf("$.dependencies[%d].version", r.Index)
 		c, err := yamlutil.SetString(ast, p, r.NewVersion)
 		if err != nil {
-			return false, fmt.Errorf("Chart.yaml dependency %q: %w", r.Name, err)
+			return nil, false, fmt.Errorf("Chart.yaml dependency %q: %w", r.Name, err)
 		}
 		changed = changed || c
 	}
 	if !changed {
 		log.Debug("no dependency versions changed")
-		return false, nil
+		return nil, false, nil
 	}
 
 	out, err := yamlutil.Render(ast)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	outBytes := []byte(out)
 	if !bytes.Equal(b, outBytes) {
-		log.Debug("writing updated Chart.yaml deps", zap.String("path", chartPath))
-		if err := os.WriteFile(chartPath, outBytes, 0o644); err != nil {
-			return false, err
+		if write {
+			log.Debug("writing updated Chart.yaml deps", zap.String("path", chartPath))
+			if err := os.WriteFile(chartPath, outBytes, 0o644); err != nil {
+				return nil, false, err
+			}
+			return nil, true, nil
 		}
-		return true, nil
+		return outBytes, true, nil
 	}
 	log.Debug("rendered Chart.yaml identical after deps update; skipping write")
-	return false, nil
+	return nil, false, nil
 }
 
 func updateImagesInChartDir(ctx context.Context, chartDir, globCSV string) (bool, error) {
-	log := logutil.FromContext(ctx).With(zap.String("func", "updateImagesInChartDir"), zap.String("chartDir", chartDir), zap.String("scanGlob", globCSV))
+	_, changed, err := updateImagesInChartDirMaybeWrite(ctx, chartDir, globCSV, true)
+	return changed, err
+}
+
+// updateImagesInChartDirMaybeWrite scans files for '# bump:' directives, resolves the new values,
+// applies them, and either writes to disk (write=true) or returns the updated bytes (write=false).
+// Returned map keys are absolute file paths.
+func updateImagesInChartDirMaybeWrite(ctx context.Context, chartDir, globCSV string, write bool) (map[string][]byte, bool, error) {
+	log := logutil.FromContext(ctx).With(zap.String("func", "updateImagesInChartDirMaybeWrite"), zap.String("chartDir", chartDir), zap.String("scanGlob", globCSV))
 	globs := splitCSV(globCSV)
 	log.Debug("expanded scan globs", zap.Strings("globs", globs))
 
@@ -297,14 +355,14 @@ func updateImagesInChartDir(ctx context.Context, chartDir, globCSV string) (bool
 		pattern := filepath.Join(chartDir, g)
 		matches, err := filepath.Glob(pattern)
 		if err != nil {
-			return false, err
+			return nil, false, err
 		}
 		log.Debug("glob matches", zap.String("pattern", pattern), zap.Int("matches", len(matches)))
 		for _, m := range matches {
 			// Only regular files.
 			st, err := os.Stat(m)
 			if err != nil {
-				return false, err
+				return nil, false, err
 			}
 			if st.Mode().IsRegular() {
 				files[m] = struct{}{}
@@ -312,12 +370,13 @@ func updateImagesInChartDir(ctx context.Context, chartDir, globCSV string) (bool
 		}
 	}
 
-	anyWritten := false
+	updated := map[string][]byte{}
+	anyChanged := false
 	for p := range files {
 		fileLog := log.With(zap.String("file", p))
 		dirs, err := directives.ScanFileForImageDirectives(ctx, p)
 		if err != nil {
-			return false, err
+			return nil, false, err
 		}
 		fileLog.Debug("scanned for bump directives", zap.Int("directives", len(dirs)))
 		if len(dirs) == 0 {
@@ -326,11 +385,11 @@ func updateImagesInChartDir(ctx context.Context, chartDir, globCSV string) (bool
 
 		b, err := os.ReadFile(p)
 		if err != nil {
-			return false, err
+			return nil, false, err
 		}
 		ast, err := yamlutil.ParseBytes(b)
 		if err != nil {
-			return false, err
+			return nil, false, err
 		}
 
 		fileChanged := false
@@ -348,7 +407,7 @@ func updateImagesInChartDir(ctx context.Context, chartDir, globCSV string) (bool
 
 			// Full image path is required.
 			if d.Image == "" {
-				return false, fmt.Errorf("%s:%d: bump directive missing required image=<full repo path>", p, d.Line)
+				return nil, false, fmt.Errorf("%s:%d: bump directive missing required image=<full repo path>", p, d.Line)
 			}
 			strategy := d.Strategy
 			if strategy == "" {
@@ -363,29 +422,29 @@ func updateImagesInChartDir(ctx context.Context, chartDir, globCSV string) (bool
 				tagPath := parentPath + ".tag"
 				tag, ok, _ := yamlutil.GetString(ast, tagPath)
 				if !ok || strings.TrimSpace(tag) == "" {
-					return false, fmt.Errorf("%s:%d: strategy=digest requires a sibling 'tag' key (looked for %s)", p, d.Line, tagPath)
+					return nil, false, fmt.Errorf("%s:%d: strategy=digest requires a sibling 'tag' key (looked for %s)", p, d.Line, tagPath)
 				}
 				dLog.Debug("resolving digest from tag", zap.String("tagPath", tagPath), zap.String("tag", tag))
 				digest, err := imageresolver.ResolveDigest(ctx, d.Image, tag, d.Platform, nil)
 				if err != nil {
-					return false, fmt.Errorf("%s:%d: %w", p, d.Line, err)
+					return nil, false, fmt.Errorf("%s:%d: %w", p, d.Line, err)
 				}
 				newValue = digest
 			case "literal", "regex", "semver":
 				dLog.Debug("resolving tag")
 				tag, err := imageresolver.ResolveTag(ctx, d.Image, strings.ToLower(strategy), d.Constraint, d.TagRegex, d.AllowPrerelease, nil)
 				if err != nil {
-					return false, fmt.Errorf("%s:%d: %w", p, d.Line, err)
+					return nil, false, fmt.Errorf("%s:%d: %w", p, d.Line, err)
 				}
 				newValue = tag
 			default:
-				return false, fmt.Errorf("%s:%d: unknown strategy %q", p, d.Line, d.Strategy)
+				return nil, false, fmt.Errorf("%s:%d: unknown strategy %q", p, d.Line, d.Strategy)
 			}
 
 			dLog.Debug("resolved new value", zap.String("current", d.CurrentText), zap.String("new", newValue))
 			c, err := yamlutil.SetString(ast, d.YAMLPath, newValue)
 			if err != nil {
-				return false, fmt.Errorf("%s:%d: failed to set %s: %w", p, d.Line, d.YAMLPath, err)
+				return nil, false, fmt.Errorf("%s:%d: failed to set %s: %w", p, d.Line, d.YAMLPath, err)
 			}
 			fileChanged = fileChanged || c
 		}
@@ -397,20 +456,27 @@ func updateImagesInChartDir(ctx context.Context, chartDir, globCSV string) (bool
 
 		out, err := yamlutil.Render(ast)
 		if err != nil {
-			return false, err
+			return nil, false, err
 		}
 		outBytes := []byte(out)
 		if !bytes.Equal(b, outBytes) {
-			fileLog.Debug("writing updated file")
-			if err := os.WriteFile(p, outBytes, 0o644); err != nil {
-				return false, err
+			anyChanged = true
+			abs, err := filepath.Abs(p)
+			if err != nil {
+				return nil, false, err
 			}
-			anyWritten = true
+			updated[abs] = outBytes
+			if write {
+				fileLog.Debug("writing updated file")
+				if err := os.WriteFile(p, outBytes, 0o644); err != nil {
+					return nil, false, err
+				}
+			}
 		} else {
 			fileLog.Debug("rendered file identical; skipping write")
 		}
 	}
-	return anyWritten, nil
+	return updated, anyChanged, nil
 }
 
 func splitCSV(s string) []string {
