@@ -2,12 +2,17 @@ package directives
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/joejulian/helm-chart-bumper-action/internal/logutil"
+
+	"go.uber.org/zap"
 )
 
 // ImageDirective describes one `# bump:` directive and the YAML scalar it applies to.
@@ -45,7 +50,9 @@ var (
 )
 
 // ScanFileForImageDirectives reads a YAML file as text and returns directives.
-func ScanFileForImageDirectives(path string) ([]ImageDirective, error) {
+func ScanFileForImageDirectives(ctx context.Context, path string) ([]ImageDirective, error) {
+	log := logutil.FromContext(ctx).With(zap.String("func", "directives.ScanFileForImageDirectives"), zap.String("path", path))
+	log.Debug("scanning file for bump directives")
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err

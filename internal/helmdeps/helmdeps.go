@@ -1,10 +1,15 @@
 package helmdeps
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"sort"
 	"strings"
+
+	"github.com/joejulian/helm-chart-bumper-action/internal/logutil"
+
+	"go.uber.org/zap"
 
 	"github.com/Masterminds/semver/v3"
 	"helm.sh/helm/v3/pkg/chartutil"
@@ -30,7 +35,9 @@ type ResolvedDep struct {
 // - Otherwise, choose the highest semver version available.
 //
 // Non-semver versions in the index are ignored.
-func ResolveLatestDependencies(chartYAMLPath string) ([]ResolvedDep, error) {
+func ResolveLatestDependencies(ctx context.Context, chartYAMLPath string) ([]ResolvedDep, error) {
+	log := logutil.FromContext(ctx).With(zap.String("func", "helmdeps.ResolveLatestDependencies"), zap.String("chartYAMLPath", chartYAMLPath))
+	log.Debug("loading Chart.yaml for dependency resolution")
 	meta, err := chartutil.LoadChartfile(chartYAMLPath)
 	if err != nil {
 		return nil, err
@@ -49,6 +56,7 @@ func ResolveLatestDependencies(chartYAMLPath string) ([]ResolvedDep, error) {
 		if dep == nil {
 			continue
 		}
+		log.Debug("considering dependency", zap.Int("index", i), zap.String("name", dep.Name), zap.String("repo", dep.Repository), zap.String("versionExpr", dep.Version))
 		repoURL := strings.TrimSpace(dep.Repository)
 		if repoURL == "" {
 			continue

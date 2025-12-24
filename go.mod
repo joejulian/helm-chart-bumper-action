@@ -7,6 +7,7 @@ require (
 	github.com/go-git/go-git/v5 v5.13.0
 	github.com/goccy/go-yaml v1.19.1
 	github.com/google/go-containerregistry v0.20.3
+	go.uber.org/zap v1.26.0
 	helm.sh/helm/v3 v3.16.2
 )
 
@@ -255,7 +256,6 @@ require (
 	go.starlark.net v0.0.0-20230525235612-a134d8f9ddca // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.uber.org/zap v1.26.0 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20250210185358-939b2ce775ac // indirect
 	golang.org/x/mod v0.24.0 // indirect
