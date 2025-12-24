@@ -3,9 +3,17 @@ name: "Helm chart bumper"
 description: "Bump Helm Chart.yaml version based on appVersion/dependency semver changes"
 
 inputs:
-  base:
-    description: "Path to base Chart.yaml to compare against"
+  base_ref:
+    description: "Git ref to read the base Chart.yaml from (e.g. 'refs/remotes/origin/main', 'origin/main', 'main', or 'HEAD~1')"
     required: true
+  base_ref_path:
+    description: "Repository-relative path to base Chart.yaml when using base_ref (defaults to cur)"
+    required: false
+    default: ""
+  repo:
+    description: "Path to the git working tree (used with base_ref)"
+    required: false
+    default: "."
   cur:
     description: "Path to current Chart.yaml to bump"
     required: true
@@ -16,11 +24,14 @@ inputs:
 
 runs:
   using: "docker"
-  image: "docker://ghcr.io/joejulian/actions/helm-chart-bumper-action:v0.0.4"
+  image: "docker://ghcr.io/joejulian/actions/helm-chart-bumper-action:v0.0.5"
   args:
-    - "--base"
-    - "${{ inputs.base }}"
+    - "--base-ref"
+    - "${{ inputs.base_ref }}"
+    - "--base-ref-path"
+    - "${{ inputs.base_ref_path }}"
+    - "--repo"
+    - "${{ inputs.repo }}"
     - "--cur"
     - "${{ inputs.cur }}"
     - "${{ inputs.write == 'true' && '--write' || '' }}"
-
