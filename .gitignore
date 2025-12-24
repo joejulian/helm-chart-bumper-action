@@ -1,2 +1,4 @@
 .idea/
 /helm-chart-bumper
+/linux
+/darwin
