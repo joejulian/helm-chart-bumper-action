@@ -1,4 +1,5 @@
 ---
+version: 2
 project_name: helm-chart-bumper-action
 
 before:
