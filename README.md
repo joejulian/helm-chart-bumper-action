@@ -150,3 +150,75 @@ go build ./cmd/helm-chart-bumper
 - No temp files or host-path coupling
 - Matrix-friendly
 - Explicit, machine-readable outputs
+
+---
+
+## Optional: update images and dependencies before bumping the chart version
+
+`helm-chart-bumper` can optionally update:
+
+- **container image versions** (by consulting container registries)
+- **Helm chart dependencies** in `Chart.yaml` (by consulting Helm repositories)
+
+Then it re-computes the semver change level and applies the appropriate bump to `Chart.yaml:version`.
+
+### Flags
+
+| Flag | Description |
+|----|------------|
+| `--update-images` | Scan YAML files for `# bump:` directives and update the immediately following scalar key |
+| `--update-deps` | Update `Chart.yaml dependencies[].version` to the latest available versions |
+| `--scan-glob` | Comma-separated glob(s) (relative to the chart directory) to scan for directives (default: `Chart.yaml,values*.yaml`) |
+
+### Image update directives
+
+To update an image version, add a directive comment **immediately above** the YAML key that stores the version you want updated.
+
+**Rules**
+
+- The directive applies to the **next non-empty, non-comment YAML line**.
+- The next YAML line **must** be a **scalar assignment** on a single line (e.g. `appVersion: "2.3.1"`, `tag: "1.2.3"`).
+- The directive is **file-local**; the tool updates the key in the same file where the directive appears.
+- `image=` is **required** and must be the **full repository path**, including registry host (examples below). No implicit `docker.io`.
+
+**Directive format**
+
+```yaml
+# bump: image=<full-image-repo> strategy=<semver|regex|literal|digest> [constraint="<semver constraint>"] [tagRegex="<regex>"] [allowPrerelease=<true|false>] [platform=<os/arch>]
+<key>: "<current value>"
+```
+
+#### Example: update `Chart.yaml appVersion` from an image registry
+
+```yaml
+# bump: image=ghcr.io/example/myapp strategy=semver constraint="^2.0.0"
+appVersion: "2.3.1"
+```
+
+#### Example: update a values file image tag
+
+```yaml
+image:
+  repository: ghcr.io/example/myapp
+  # bump: image=ghcr.io/example/myapp strategy=semver
+  tag: "2.3.1"
+```
+
+#### Example: update a digest from a sibling `tag`
+
+```yaml
+image:
+  repository: ghcr.io/example/myapp
+  # bump: image=ghcr.io/example/myapp strategy=semver
+  tag: "2.3.1"
+  # bump: image=ghcr.io/example/myapp strategy=digest platform=linux/amd64
+  digest: "sha256:..."
+```
+
+### Dependency updates
+
+When `--update-deps` is enabled, `helm-chart-bumper` resolves the latest versions of `Chart.yaml` dependencies by downloading each dependency repository's `index.yaml` and selecting the newest matching semver.
+
+- If `dependencies[].version` is a semver constraint, the selected version must satisfy it.
+- If it is not a constraint, the selected version is simply the highest semver available.
+
