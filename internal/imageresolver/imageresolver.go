@@ -8,6 +8,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/joejulian/helm-chart-bumper-action/internal/logutil"
+
+	"go.uber.org/zap"
+
 	"github.com/Masterminds/semver/v3"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/crane"
@@ -40,7 +44,9 @@ func defaultOptions() Options {
 // - semver: choose highest semver tag (optionally constrained). Excludes prereleases unless allowPrerelease=true.
 // - regex: filter tags by tagRegex. If regex has a capture group containing a semver, ordering uses that.
 // - literal: requires tagRegex that matches exactly one tag; that tag is returned.
-func ResolveTag(imageRepo, strategy, constraint, tagRegex string, allowPrerelease bool, opts *Options) (string, error) {
+func ResolveTag(ctx context.Context, imageRepo, strategy, constraint, tagRegex string, allowPrerelease bool, opts *Options) (string, error) {
+	log := logutil.FromContext(ctx).With(zap.String("func", "imageresolver.ResolveTag"), zap.String("image", imageRepo), zap.String("strategy", strategy))
+	log.Debug("resolving tag", zap.String("constraint", constraint), zap.String("tagRegex", tagRegex), zap.Bool("allowPrerelease", allowPrerelease))
 	if imageRepo == "" {
 		return "", fmt.Errorf("image repository must be provided")
 	}
@@ -50,7 +56,10 @@ func ResolveTag(imageRepo, strategy, constraint, tagRegex string, allowPrereleas
 	}
 	if opts == nil {
 		o := defaultOptions()
+		o.Context = ctx
 		opts = &o
+	} else if opts.Context == nil {
+		opts.Context = ctx
 	}
 
 	strategy = strings.TrimSpace(strategy)
@@ -87,13 +96,18 @@ func ResolveTag(imageRepo, strategy, constraint, tagRegex string, allowPrereleas
 
 // ResolveDigest resolves the manifest digest for imageRepo:tag.
 // If platform is non-empty (e.g. linux/amd64), it selects that platform in an index.
-func ResolveDigest(imageRepo, tag, platform string, opts *Options) (string, error) {
+func ResolveDigest(ctx context.Context, imageRepo, tag, platform string, opts *Options) (string, error) {
+	log := logutil.FromContext(ctx).With(zap.String("func", "imageresolver.ResolveDigest"), zap.String("image", imageRepo), zap.String("tag", tag), zap.String("platform", platform))
+	log.Debug("resolving digest")
 	if imageRepo == "" || tag == "" {
 		return "", fmt.Errorf("image repository and tag are required to resolve digest")
 	}
 	if opts == nil {
 		o := defaultOptions()
+		o.Context = ctx
 		opts = &o
+	} else if opts.Context == nil {
+		opts.Context = ctx
 	}
 
 	refStr := imageRepo + ":" + tag
