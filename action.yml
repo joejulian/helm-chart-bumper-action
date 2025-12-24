@@ -1,10 +1,10 @@
 ---
 name: "Helm chart bumper"
-description: "Bump Helm Chart.yaml version based on appVersion/dependency semver changes"
+description: "Bump Helm Chart.yaml version based on appVersion/dependency semver changes (optionally updating images/deps first)"
 
 outputs:
   changed:
-    description: "true if --write caused the current Chart.yaml to be modified on disk"
+    description: "true if --write caused any file to be modified on disk"
 
 inputs:
   base_ref:
@@ -22,13 +22,25 @@ inputs:
     description: "Path to current Chart.yaml to bump"
     required: true
   write:
-    description: "Whether to write changes back to the current Chart.yaml"
+    description: "Whether to write changes back to disk (Chart.yaml + any scanned YAML files)"
     required: false
     default: "false"
+  update_images:
+    description: "Whether to update scalar versions based on '# bump:' image directives in Chart.yaml and values*.yaml"
+    required: false
+    default: "false"
+  update_deps:
+    description: "Whether to update Chart.yaml dependencies to latest versions from their Helm repositories"
+    required: false
+    default: "false"
+  scan_glob:
+    description: "Comma-separated glob(s) relative to the chart directory to scan for '# bump:' directives"
+    required: false
+    default: "Chart.yaml,values*.yaml"
 
 runs:
   using: "docker"
-  image: "docker://ghcr.io/joejulian/actions/helm-chart-bumper-action:v0.0.6"
+  image: "docker://ghcr.io/joejulian/actions/helm-chart-bumper-action:v0.0.7"
   args:
     - "--base-ref"
     - "${{ inputs.base_ref }}"
@@ -38,4 +50,8 @@ runs:
     - "${{ inputs.repo }}"
     - "--cur"
     - "${{ inputs.cur }}"
+    - "--scan-glob"
+    - "${{ inputs.scan_glob }}"
     - "${{ inputs.write == 'true' && '--write' || '' }}"
+    - "${{ inputs.update_images == 'true' && '--update-images' || '' }}"
+    - "${{ inputs.update_deps == 'true' && '--update-deps' || '' }}"
