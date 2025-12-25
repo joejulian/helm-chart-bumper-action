@@ -36,11 +36,15 @@ inputs:
   scan_glob:
     description: "Comma-separated glob(s) relative to the chart directory to scan for '# bump:' directives"
     required: false
-    default: "Chart.yaml,values*.yaml"
+    default: "Chart.yaml|values*.yaml"
+  log_level:
+    description: "log level from 1 to 6"
+    required: false
+    default: 1
 
 runs:
   using: "docker"
-  image: "docker://ghcr.io/joejulian/actions/helm-chart-bumper-action:v0.0.12"
+  image: "docker://ghcr.io/joejulian/actions/helm-chart-bumper-action:v0.0.13"
   args:
     - "--base-ref"
     - "${{ inputs.base_ref }}"
@@ -55,3 +59,5 @@ runs:
     - "${{ inputs.write == 'true' && '--write' || '' }}"
     - "${{ inputs.update_images == 'true' && '--update-images' || '' }}"
     - "${{ inputs.update_deps == 'true' && '--update-deps' || '' }}"
+    - "-v"
+    - "${{ inputs.log_level }}"
